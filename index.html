@@ -1,0 +1,1991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Editor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --navbar-h: 38px;
+            --panel-bg: #161b22;
+            --panel-border: #2d3748;
+            --panel-header: #1a2030;
+            --accent: #38bdf8;
+            --accent-dim: #0ea5e9;
+        }
+        body { overflow: hidden; background: #0d1117; color: #e2e8f0; font-size: 0.9rem; }
+
+        .main-scroll {
+            height: calc(100vh - var(--navbar-h));
+            overflow-y: auto;
+        }
+        @media (min-width: 992px) {
+            .sticky-panel {
+                position: sticky;
+                top: 0.5rem;
+                max-height: calc(100vh - var(--navbar-h) - 1rem);
+                overflow-y: auto;
+            }
+        }
+        .sticky-panel::-webkit-scrollbar { width: 4px; }
+        .sticky-panel::-webkit-scrollbar-track { background: transparent; }
+        .sticky-panel::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
+
+        /* Checkerboard canvas bg */
+        .checkered-bg {
+            background-image:
+                linear-gradient(45deg, #1a1f2e 25%, transparent 25%),
+                linear-gradient(-45deg, #1a1f2e 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #1a1f2e 75%),
+                linear-gradient(-45deg, transparent 75%, #1a1f2e 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            background-color: #111827;
+        }
+
+        .panel-card {
+            background-color: var(--panel-bg) !important;
+            border-color: var(--panel-border) !important;
+        }
+        .panel-header {
+            background-color: var(--panel-header) !important;
+            border-bottom: 1px solid var(--panel-border) !important;
+        }
+        .panel-footer {
+            background-color: var(--panel-header) !important;
+            border-top: 1px solid var(--panel-border) !important;
+        }
+
+        .section-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.09em;
+            color: #b8c4d6;
+            margin-bottom: 0.4rem;
+        }
+
+        /* Drop zone */
+        #dropZone {
+            border: 2px dashed var(--panel-border);
+            border-radius: 8px;
+            padding: 8px 10px 6px;
+            transition: border-color 0.15s, background-color 0.15s;
+            cursor: pointer;
+        }
+        #dropZone:hover, #dropZone.drag-over {
+            border-color: var(--accent) !important;
+            background-color: rgba(56, 189, 248, 0.05) !important;
+        }
+        #dropZone .drop-hint {
+            font-size: 0.8rem;
+            color: #a6b3c5;
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Tool buttons */
+        .tool-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            padding: 5px 2px;
+            font-size: 0.66rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            border-radius: 5px;
+            border: 1px solid var(--panel-border);
+            background: #1e2535;
+            color: #dde4ee;
+            cursor: pointer;
+            transition: all 0.15s;
+            width: 100%;
+            min-height: 42px;
+        }
+        .tool-btn i { font-size: 1rem; }
+        .tool-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(56,189,248,0.08); }
+        .tool-btn.active {
+            border-color: var(--accent) !important;
+            background: rgba(56, 189, 248, 0.18) !important;
+            color: var(--accent) !important;
+        }
+        .tool-btn.active-warn {
+            border-color: #f59e0b !important;
+            background: rgba(245,158,11,0.15) !important;
+            color: #f59e0b !important;
+        }
+        /* Larger touch targets on small / touch screens so the dense tool
+           grid doesn't become fiddly to tap accurately */
+        @media (max-width: 575.98px) {
+            .tool-btn { min-height: 50px; font-size: 0.7rem; padding: 7px 2px; }
+            .tool-btn i { font-size: 1.15rem; }
+        }
+
+        /* Canvas wrapper & cursor */
+        #canvasWrap {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #canvasWrap.drag-over-canvas { outline: 3px dashed var(--accent); outline-offset: -3px; }
+        #mainCanvas {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+        #mainCanvas.cursor-crosshair { cursor: crosshair; }
+        #mainCanvas.cursor-grab { cursor: grab; }
+        #mainCanvas.cursor-cell { cursor: cell; }
+        #mainCanvas.cursor-default { cursor: default; }
+
+        /* Draw overlay for shapes & censor guides */
+        #drawOverlay {
+            position: absolute;
+            top: 0; left: 0;
+            pointer-events: none;
+        }
+
+        /* Crop overlay */
+        #cropOverlay {
+            position: absolute;
+            top: 0; left: 0;
+            pointer-events: none;
+            display: none;
+        }
+        .crop-box {
+            position: absolute;
+            border: 2px dashed #38bdf8;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.45);
+        }
+
+        /* Undo/redo nav */
+        .history-btn {
+            transition: all 0.15s;
+            color: #ffffff;
+        }
+        #shortcutsBtn:hover {
+            border-color: var(--accent) !important;
+            color: var(--accent) !important;
+        }
+        #undoBtn {
+            background: #f59e0b;
+            border: 1px solid #f59e0b;
+        }
+        #undoBtn:hover:not(:disabled) {
+            background: #d97706;
+            border-color: #d97706;
+        }
+        #redoBtn {
+            background: #34c759;
+            border: 1px solid #34c759;
+        }
+        #redoBtn:hover:not(:disabled) {
+            background: #22a544;
+            border-color: #22a544;
+        }
+        .history-btn:disabled { opacity: 0.35; background: #1e2535 !important; border-color: #374151 !important; color: #64748b !important; }
+
+        /* Export */
+        #downloadBtn {
+            background: var(--accent-dim);
+            border: 1px solid var(--accent-dim);
+            color: #ffffff;
+            transition: all 0.15s;
+        }
+        #downloadBtn:hover {
+            background: #0284c7;
+            border-color: #0284c7;
+            color: #ffffff;
+        }
+
+        /* Copy to clipboard */
+        #copyBtn {
+            background: #0891b2;
+            border: 1px solid #0891b2;
+            color: #ffffff;
+            transition: all 0.15s;
+        }
+        #copyBtn:hover:not(:disabled) {
+            background: #0e7490;
+            border-color: #0e7490;
+            color: #ffffff;
+        }
+        #copyBtn.copied {
+            background: #155e75;
+            border-color: #155e75;
+            color: #ffffff;
+        }
+
+        /* Preview modal: fit viewport, no scroll */
+        #previewModal { overflow: hidden; }
+        #previewModal .modal-dialog { max-height: 98vh; }
+        #previewModal .modal-body { overscroll-behavior: contain; }
+
+        /* Keyboard shortcuts cheat sheet */
+        #shortcutsModal kbd {
+            background: #1e2535;
+            border: 1px solid #374151;
+            border-radius: 4px;
+            color: #dde4ee;
+            font-size: 0.78rem;
+            padding: 1px 6px;
+            box-shadow: 0 1px 0 #0d1117;
+        }
+        #shortcutsModal .row > div:hover { color: var(--accent); }
+
+        /* Preview */
+        #previewBtn {
+            background: #a855f7;
+            border: 1px solid #a855f7;
+            color: #ffffff;
+            transition: all 0.15s;
+        }
+        #previewBtn:hover {
+            background: #9333ea;
+            border-color: #9333ea;
+            color: #ffffff;
+        }
+
+        /* Clear drawings */
+        #clearDrawingsBtn {
+            background: #ef4444;
+            border: 1px solid #ef4444;
+            color: #ffffff;
+            transition: all 0.15s;
+        }
+        #clearDrawingsBtn:hover:not(:disabled) {
+            background: #dc2626;
+            border-color: #dc2626;
+            color: #ffffff;
+        }
+
+        /* Color swatch */
+        .color-swatch-row { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+        .color-swatch {
+            width: 18px; height: 18px;
+            border-radius: 3px;
+            border: 1px solid #374151;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        .color-swatch:hover { transform: scale(1.2); }
+        .color-swatch.active-swatch { outline: 2px solid #fff; outline-offset: 1px; }
+
+        /* Info bar */
+        #infoBar {
+            font-size: 0.8rem;
+            color: #a6b3c5;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Empty state */
+        #emptyState {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            pointer-events: none;
+        }
+        #emptyState i { font-size: 3rem; color: #475569; }
+        #emptyState p { color: #94a3b8; font-size: 0.92rem; margin: 0; }
+
+        /* Range inputs */
+        .form-range::-webkit-slider-thumb { background: var(--accent); }
+
+        /* Rotate indicator */
+        #rotateVal { font-variant-numeric: tabular-nums; }
+
+        /* Collapsed tool options */
+        .tool-opts { display: none; }
+        .tool-opts.visible { display: block; }
+
+        /* Resize sub-panels (scale / max width / max height / exact) */
+        .resize-sub { display: none; }
+        .resize-sub.visible { display: block; }
+
+        /* Zoom cursors */
+        #mainCanvas.cursor-zoom-in  { cursor: zoom-in; }
+        #mainCanvas.cursor-zoom-out { cursor: zoom-out; }
+
+        /* Navbar export controls */
+        #navExportWrap { display: none; align-items: center; gap: 6px; }
+        #navExportWrap.visible { display: flex; }
+        #navExportWrap select { font-size:0.78rem; padding:1px 4px; height:24px; background:#1e2535; color:#f1f5f9; border:1px solid #475569; border-radius:4px; }
+        #navQualityWrap { display:flex; align-items:center; gap:3px; }
+        #navExportQuality { width:64px; accent-color:var(--accent); }
+        #navExportQualityVal { font-size:0.76rem; color:var(--accent); min-width:32px; font-variant-numeric:tabular-nums; }
+    </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar navbar-dark px-3 px-lg-4" style="height:var(--navbar-h);background:#080d14;border-bottom:1px solid #1e2535;min-height:unset;">
+    <a class="navbar-brand d-flex align-items-center gap-2 py-0" href="#">
+        <i class="bi bi-palette2 text-info" style="font-size:1rem;"></i>
+        <span class="fw-bold" style="letter-spacing:-0.02em;font-size:0.95rem;">Image Editor</span>
+    </a>
+    <div class="d-flex align-items-center gap-1">
+        <button id="shortcutsBtn" class="btn history-btn py-1 px-2" style="font-size:1rem;line-height:1;background:#1e2535;border:1px solid #374151;" title="Keyboard shortcuts (?)"><i class="bi bi-question-lg"></i></button>
+        <button id="undoBtn" class="btn history-btn py-1 px-2" style="font-size:1rem;line-height:1;" title="Undo (Ctrl+Z)" disabled><i class="bi bi-arrow-counterclockwise"></i></button>
+        <button id="redoBtn" class="btn history-btn py-1 px-2" style="font-size:1rem;line-height:1;" title="Redo (Ctrl+Y)" disabled><i class="bi bi-arrow-clockwise"></i></button>
+        <div id="navExportWrap">
+            <select id="outputFormat" title="Export format">
+                <option value="image/webp" selected>WebP</option>
+                <option value="image/jpeg">JPG</option>
+                <option value="image/png">PNG</option>
+            </select>
+            <div id="navQualityWrap">
+                <input type="range" id="exportQuality" min="1" max="100" value="90">
+                <span id="exportQualityVal">90%</span>
+            </div>
+        </div>
+        <button id="downloadBtn" class="btn fw-bold px-2 d-none" style="font-size:0.82rem;padding-top:1px;padding-bottom:1px;"><i class="bi bi-download me-1"></i>Export</button>
+    </div>
+</nav>
+
+<div class="main-scroll">
+<div class="container-fluid px-2 px-lg-3 py-2">
+<div class="row g-2">
+
+    <!-- ── LEFT PANEL ── -->
+    <div class="col-12 col-xl-3 col-lg-4">
+        <div class="card panel-card border shadow-sm sticky-panel">
+            <div class="card-header panel-header py-2">
+                <h6 class="mb-0 small fw-bold text-info text-uppercase" style="letter-spacing:.07em;"><i class="bi bi-tools me-2"></i>Tools</h6>
+            </div>
+            <div class="card-body py-2 px-3">
+
+                <!-- Image load -->
+                <p class="section-label">Image</p>
+                <div id="dropZone" class="mb-3">
+                    <input type="file" id="imageLoader" accept="image/*" class="form-control bg-dark text-light border-secondary form-control-sm">
+                    <div class="drop-hint"><i class="bi bi-cloud-upload"></i> drag &amp; drop, or paste (Ctrl+V)</div>
+                </div>
+
+                <!-- Tool grid -->
+                <p class="section-label">Draw &amp; Edit</p>
+                <div class="row g-1 mb-2">
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-select" title="Select / Move (V)"><i class="bi bi-cursor"></i>Select</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-freehand" title="Freehand pen (P)"><i class="bi bi-pencil"></i>Pen</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-rect" title="Rectangle (R)"><i class="bi bi-square"></i>Rect</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-ellipse" title="Ellipse / Circle (O)"><i class="bi bi-circle"></i>Ellipse</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-line" title="Straight line (L)"><i class="bi bi-slash-lg"></i>Line</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-arrow" title="Arrow (A)"><i class="bi bi-arrow-up-right"></i>Arrow</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-text" title="Add text (T)"><i class="bi bi-fonts"></i>Text</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-marker" title="Numbered marker (N)"><i class="bi bi-pin-map-fill"></i>Marker</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-censor" title="Blur / censor area (B)"><i class="bi bi-eye-slash"></i>Censor</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-crop" title="Crop image (C)"><i class="bi bi-crop"></i>Crop</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-resize" title="Resize image (S)"><i class="bi bi-aspect-ratio"></i>Resize</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-bw" title="Toggle black &amp; white (W)"><i class="bi bi-circle-half"></i>B&amp;W</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-rotate-cw" title="Rotate 90° (Shift+R)"><i class="bi bi-arrow-clockwise"></i>Rotate</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-flip" title="Flip image (H) — direction set below"><i class="bi bi-symmetry-vertical"></i>Flip</button></div>
+                    <div class="col-4 col-sm-3"><button class="tool-btn" id="tool-zoom" title="Zoom &amp; pan (Z)"><i class="bi bi-zoom-in"></i>Zoom</button></div>
+                </div>
+
+                <!-- Flip direction (applies to the Flip button / H shortcut) -->
+                <div class="d-flex align-items-center justify-content-between mb-2 px-1">
+                    <span class="small" style="color:#cbd5e1;">Flip direction</span>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Flip direction">
+                        <button type="button" class="btn btn-outline-info active" id="flipDirH" style="font-size:0.74rem;padding:2px 10px;">Horizontal</button>
+                        <button type="button" class="btn btn-outline-info" id="flipDirV" style="font-size:0.74rem;padding:2px 10px;">Vertical</button>
+                    </div>
+                </div>
+
+                <!-- Separator -->
+                <hr class="border-secondary my-2">
+
+                <!-- Draw options -->
+                <div id="drawOpts">
+                    <!-- Color -->
+                    <div id="colorOpts" class="tool-opts">
+                        <p class="section-label">Color</p>
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <input type="color" id="strokeColor" value="#ff3b3b" class="form-control form-control-color border-secondary p-1" style="width:36px;height:28px;background:#1e2535;">
+                            <span id="fillColorWrap" style="display:inline-flex;align-items:center;gap:8px;">
+                                <input type="color" id="fillColor" value="#ff3b3b" class="form-control form-control-color border-secondary p-1" style="width:36px;height:28px;background:#1e2535;" title="Fill color">
+                            </span>
+                            <label class="small mb-0" id="colorSwatchLabel" style="color:#cbd5e1;">Stroke &nbsp;Fill</label>
+                        </div>
+                        <div class="color-swatch-row mb-2" id="swatchRow"></div>
+                    </div>
+
+                    <!-- Stroke width -->
+                    <div id="strokeOpts" class="tool-opts">
+                        <p class="section-label mt-1">Stroke Width &amp; Opacity</p>
+                        <div class="d-flex gap-2 align-items-center mb-1">
+                            <input type="range" id="strokeWidth" min="1" max="40" value="10" class="form-range flex-grow-1">
+                            <span id="strokeWidthVal" class="small text-info fw-semibold" style="min-width:22px;font-size:0.82rem;">10</span>
+                        </div>
+                        <div class="d-flex gap-2 align-items-center mb-2">
+                            <input type="range" id="strokeOpacity" min="0.05" max="1" step="0.05" value="1" class="form-range flex-grow-1">
+                            <span id="strokeOpacityVal" class="small text-info fw-semibold" style="min-width:30px;font-size:0.82rem;">100%</span>
+                        </div>
+                    </div>
+
+                    <!-- Fill toggle -->
+                    <div id="fillOpts" class="tool-opts">
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <div class="form-check form-switch ps-0 m-0">
+                                <input type="checkbox" id="fillToggle" class="form-check-input ms-0 mt-0" role="switch">
+                            </div>
+                            <label class="small mb-0" style="color:#cbd5e1;" for="fillToggle">Fill shapes</label>
+                        </div>
+                    </div>
+
+                    <!-- Text-specific opts -->
+                    <div id="textOpts" class="tool-opts">
+                        <p class="section-label">Text</p>
+                        <div class="d-flex gap-2 mb-1">
+                            <input type="text" id="textInput" placeholder="Your text…" class="form-control form-control-sm bg-dark text-light border-secondary flex-grow-1">
+                            <input type="number" id="textSize" value="24" min="8" max="200" class="form-control form-control-sm bg-dark text-light border-secondary" style="width:60px;">
+                        </div>
+                        <select id="textFont" class="form-select form-select-sm bg-dark text-light border-secondary mb-2">
+                            <option value="sans-serif">Sans-Serif</option>
+                            <option value="serif">Serif</option>
+                            <option value="monospace">Monospace</option>
+                            <option value="Impact">Impact</option>
+                            <option value="Georgia">Georgia</option>
+                        </select>
+
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <div class="form-check form-switch ps-0 m-0">
+                                <input type="checkbox" id="textBgToggle" class="form-check-input ms-0 mt-0" role="switch" checked>
+                            </div>
+                            <label class="small mb-0" style="color:#cbd5e1;" for="textBgToggle">Background</label>
+                        </div>
+                        <div id="textBgSubOpts" style="display:block;">
+                            <div class="d-flex gap-2 align-items-center mb-1">
+                                <input type="color" id="textBgColor" value="#000000" class="form-control form-control-color border-secondary p-1" style="width:36px;height:28px;background:#1e2535;" title="Background color">
+                                <input type="range" id="textBgOpacity" min="0.05" max="1" step="0.05" value="1" class="form-range flex-grow-1" title="Background opacity">
+                                <span id="textBgOpacityVal" class="small text-info fw-semibold" style="min-width:30px;font-size:0.82rem;">100%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Censor-specific opts -->
+                    <div id="censorOpts" class="tool-opts">
+                        <p class="section-label">Blur Strength</p>
+                        <div class="d-flex gap-2 align-items-center">
+                            <input type="range" id="censorBlur" min="4" max="60" value="20" class="form-range flex-grow-1">
+                            <span id="censorBlurVal" class="small text-info fw-semibold" style="min-width:26px;font-size:0.82rem;">20px</span>
+                        </div>
+                    </div>
+
+                    <!-- Marker-specific opts -->
+                    <div id="markerOpts" class="tool-opts">
+                        <p class="section-label">Marker Size</p>
+                        <div class="d-flex gap-2 align-items-center mb-2">
+                            <input type="range" id="markerSize" min="14" max="60" value="40" class="form-range flex-grow-1">
+                            <span id="markerSizeVal" class="small text-info fw-semibold" style="min-width:26px;font-size:0.82rem;">40px</span>
+                        </div>
+                        <div class="d-flex align-items-center justify-content-between mb-1">
+                            <span class="small" style="color:#cbd5e1;">Next number</span>
+                            <span id="markerNextVal" class="badge bg-secondary text-light" style="font-size:0.78rem;">1</span>
+                        </div>
+                        <button id="resetMarkerBtn" class="btn btn-sm btn-outline-secondary w-100 mt-1">Reset numbering</button>
+                    </div>
+
+                    <!-- Crop commit -->
+                    <div id="cropOpts" class="tool-opts">
+                        <p class="section-label">Crop</p>
+                        <button id="applyCropBtn" class="btn btn-sm btn-info w-100 fw-bold">Apply Crop</button>
+                    </div>
+
+                    <!-- Resize opts -->
+                    <div id="resizeOpts" class="tool-opts">
+                        <p class="section-label">Resize Mode</p>
+                        <select id="resizeMode" class="form-select form-select-sm bg-dark text-light border-secondary mb-2">
+                            <option value="scale">Scale %</option>
+                            <option value="maxWidth">Max Width</option>
+                            <option value="maxHeight">Max Height</option>
+                            <option value="exact">Exact Size</option>
+                        </select>
+
+                        <!-- Scale % -->
+                        <div id="resizeScaleOpts" class="resize-sub">
+                            <p class="section-label mt-1">Scale</p>
+                            <div class="d-flex gap-2 align-items-center mb-2">
+                                <input type="range" id="resizeScale" min="1" max="400" value="100" class="form-range flex-grow-1">
+                                <span id="resizeScaleVal" class="small text-info fw-semibold" style="min-width:38px;font-size:0.82rem;">100%</span>
+                            </div>
+                        </div>
+
+                        <!-- Max Width -->
+                        <div id="resizeMaxWidthOpts" class="resize-sub">
+                            <p class="section-label mt-1">Max Width (px)</p>
+                            <input type="number" id="resizeMaxWidth" value="1920" min="1" class="form-control form-control-sm bg-dark text-light border-secondary mb-2">
+                        </div>
+
+                        <!-- Max Height -->
+                        <div id="resizeMaxHeightOpts" class="resize-sub">
+                            <p class="section-label mt-1">Max Height (px)</p>
+                            <input type="number" id="resizeMaxHeight" value="1080" min="1" class="form-control form-control-sm bg-dark text-light border-secondary mb-2">
+                        </div>
+
+                        <!-- Exact Size -->
+                        <div id="resizeExactOpts" class="resize-sub">
+                            <p class="section-label mt-1">Exact Size (px)</p>
+                            <div class="d-flex gap-2 mb-2">
+                                <input type="number" id="resizeExactWidth" value="800" min="1" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Width">
+                                <input type="number" id="resizeExactHeight" value="600" min="1" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Height">
+                            </div>
+                            <p class="section-label">Fit Mode</p>
+                            <select id="resizeFitMode" class="form-select form-select-sm bg-dark text-light border-secondary mb-2">
+                                <option value="fit">Fit (contain, keep ratio)</option>
+                                <option value="fill">Fill (cover, keep ratio, crop)</option>
+                                <option value="stretch">Stretch (ignore ratio)</option>
+                            </select>
+                        </div>
+
+                        <button id="applyResizeBtn" class="btn btn-sm btn-info w-100 fw-bold mt-1">Apply Resize</button>
+                    </div>
+
+                    <!-- Zoom-specific opts -->
+                    <div id="zoomOpts" class="tool-opts">
+                        <p class="section-label">Zoom</p>
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="small" style="color:#cbd5e1;">Level</span>
+                            <span id="zoomLevelVal" class="badge bg-info text-dark" style="font-size:0.78rem;">100%</span>
+                        </div>
+                        <button id="resetZoomBtn" class="btn btn-sm btn-outline-secondary w-100">
+                            <i class="bi bi-aspect-ratio me-1"></i>Reset Zoom
+                        </button>
+                        <p class="small mt-2 mb-0" style="color:#7c8aa0;font-size:0.74rem;">
+                            Scroll or click to zoom · drag to pan · double-click to reset
+                        </p>
+                    </div>
+                </div>
+
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ── CANVAS ── -->
+    <div class="col-12 col-xl-9 col-lg-8">
+        <div class="card panel-card border shadow-sm d-flex flex-column" style="height:calc(100vh - var(--navbar-h) - 1.5rem);">
+            <div class="card-header panel-header py-2 d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                <div class="d-flex align-items-center gap-2">
+                    <h6 class="mb-0 small fw-bold text-info text-uppercase" style="letter-spacing:.07em;"><i class="bi bi-image me-2"></i>Canvas</h6>
+                    <span id="infoBar" class="ms-1">— open an image to begin</span>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span id="activeTool" class="badge bg-secondary text-light" style="font-size:0.72rem;">select</span>
+                    <button id="previewBtn" class="btn btn-sm fw-bold d-none" title="Preview: compare original vs. edited"><i class="bi bi-layout-split me-1"></i>Preview</button>
+                    <button id="copyBtn" class="btn btn-sm fw-bold d-none" title="Copy image to clipboard (always PNG — browsers don't support copying JPEG/WebP to the OS clipboard)"><i class="bi bi-clipboard me-1"></i>Copy</button>
+                    <button id="clearDrawingsBtn" class="btn btn-sm fw-bold d-none" title="Clear all drawings"><i class="bi bi-eraser me-1"></i>Clear drawings</button>
+                </div>
+            </div>
+            <div class="card-body p-2 flex-grow-1 bg-black overflow-hidden d-flex align-items-center justify-content-center">
+                <div class="checkered-bg rounded w-100 h-100 position-relative" id="canvasWrap">
+                    <canvas id="mainCanvas"></canvas>
+                    <canvas id="drawOverlay"></canvas>
+                    <div id="cropOverlay"><div class="crop-box" id="cropBox"></div></div>
+                    <div id="emptyState">
+                        <i class="bi bi-image-alt"></i>
+                        <p>Open an image to get started</p>
+                        <p style="font-size:0.8rem;color:#64748b;">Drag &amp; drop, paste (Ctrl+V), or use the file picker</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+</div>
+</div>
+
+<!-- Preview Modal: Original vs Edited -->
+<div class="modal fade" id="previewModal" tabindex="-1" aria-labelledby="previewModalLabel" aria-hidden="true">
+    <div class="modal-dialog" style="max-width:98vw; width:98vw; height:98vh; max-height:98vh; margin:1vh auto; display:flex;">
+        <div class="modal-content panel-card border" style="height:100%; max-height:98vh; display:flex; flex-direction:column; overflow:hidden;">
+            <div class="modal-header panel-header py-2" style="flex:0 0 auto;">
+                <h6 class="modal-title mb-0 small fw-bold text-info text-uppercase" id="previewModalLabel" style="letter-spacing:.07em;"><i class="bi bi-layout-split me-2"></i>Preview</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-3 d-flex flex-column" style="flex:1 1 auto; min-height:0; overflow:hidden;">
+                <div class="row g-3" style="flex:1 1 auto; min-height:0;">
+                    <div class="col-12 col-md-6 d-flex flex-column" style="height:100%; min-height:0;">
+                        <p class="section-label text-center mb-2" style="flex:0 0 auto;">Original</p>
+                        <div class="checkered-bg rounded d-flex align-items-center justify-content-center" style="flex:1 1 auto; min-height:0; overflow:hidden;">
+                            <img id="previewOriginalImg" src="" alt="Original image" style="max-width:100%;max-height:100%;object-fit:contain;display:block;">
+                        </div>
+                        <p id="previewOriginalDims" class="text-center mt-2 mb-0" style="flex:0 0 auto; font-size:0.8rem;color:#a6b3c5;font-variant-numeric:tabular-nums;"></p>
+                    </div>
+                    <div class="col-12 col-md-6 d-flex flex-column" style="height:100%; min-height:0;">
+                        <p class="section-label text-center mb-2" style="flex:0 0 auto;">Edited</p>
+                        <div class="checkered-bg rounded d-flex align-items-center justify-content-center" style="flex:1 1 auto; min-height:0; overflow:hidden;">
+                            <img id="previewEditedImg" src="" alt="Edited image" style="max-width:100%;max-height:100%;object-fit:contain;display:block;">
+                        </div>
+                        <p id="previewEditedDims" class="text-center mt-2 mb-0" style="flex:0 0 auto; font-size:0.8rem;color:#a6b3c5;font-variant-numeric:tabular-nums;"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Keyboard Shortcuts Modal -->
+<div class="modal fade" id="shortcutsModal" tabindex="-1" aria-labelledby="shortcutsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:560px;">
+        <div class="modal-content panel-card border">
+            <div class="modal-header panel-header py-2">
+                <h6 class="modal-title mb-0 small fw-bold text-info text-uppercase" id="shortcutsModalLabel" style="letter-spacing:.07em;"><i class="bi bi-keyboard me-2"></i>Keyboard Shortcuts</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-3" style="max-height:75vh;overflow-y:auto;">
+                <p class="section-label mb-2">Tools</p>
+                <div class="row gx-4 gy-1 mb-3" style="font-size:0.85rem;">
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Select / Move</span><kbd>V</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Pen (freehand)</span><kbd>P</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Rectangle</span><kbd>R</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Ellipse / Circle</span><kbd>O</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Line</span><kbd>L</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Arrow</span><kbd>A</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Text</span><kbd>T</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Numbered marker</span><kbd>N</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Censor / blur</span><kbd>B</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Crop</span><kbd>C</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Resize</span><kbd>S</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Black &amp; white</span><kbd>W</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Flip</span><kbd>H</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Rotate 90°</span><kbd>Shift</kbd>+<kbd>R</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Zoom &amp; pan</span><kbd>Z</kbd></div>
+                </div>
+                <p class="section-label mb-2">General</p>
+                <div class="row gx-4 gy-1" style="font-size:0.85rem;">
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Undo</span><kbd>Ctrl</kbd>+<kbd>Z</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Redo</span><kbd>Ctrl</kbd>+<kbd>Y</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Paste image</span><kbd>Ctrl</kbd>+<kbd>V</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Cancel crop</span><kbd>Esc</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Show this cheat sheet</span><kbd>?</kbd></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="historyToast" role="status" aria-live="polite" style="position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(12px); background:#1e2535; border:1px solid #374151; color:#cbd5e1; font-size:0.82rem; padding:8px 14px; border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,0.4); z-index:2000; opacity:0; pointer-events:none; transition:opacity 0.25s, transform 0.25s; max-width:320px; text-align:center;">
+    <i class="bi bi-info-circle me-1"></i><span id="historyToastText"></span>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════
+const canvas   = document.getElementById('mainCanvas');
+const ctx      = canvas.getContext('2d');
+const overlay  = document.getElementById('drawOverlay');
+const octx     = overlay.getContext('2d');
+const canvasWrap  = document.getElementById('canvasWrap');
+const cropOverlayEl = document.getElementById('cropOverlay');
+const cropBoxEl     = document.getElementById('cropBox');
+const emptyState    = document.getElementById('emptyState');
+
+let sourceImage   = null;   // original HTMLImageElement
+let bwMode        = false;
+let colorSnapshot = null;   // ImageData saved before B&W conversion
+let currentAngle  = 0;      // 0, 90, 180, 270
+let flipDirection = 'h';    // 'h' or 'v' — which way the Flip button/shortcut mirrors
+let activeTool    = 'select';
+let history       = [];     // compressed snapshots: { blob, width, height }
+let historyIdx    = -1;
+let historyBytes  = 0;      // running total of compressed bytes currently held
+let historyWarned = false;  // whether we've already told the user about trimming
+let historyToken  = 0;      // bumped on every history mutation; guards stale async writes
+let markerCount   = 1;      // next numbered marker label
+
+// Zoom / pan state (CSS transform on canvas)
+let zoomLevel  = 1;
+let panX       = 0;
+let panY       = 0;
+let isPanning  = false;
+let panStart   = null;     // {x, y, panX, panY}
+let lastPinchDist = null;
+
+// Drawing state
+let isDrawing     = false;
+let drawStart     = null;   // {x, y} in canvas coords
+let lastPoint     = null;   // for freehand
+
+// Crop state
+let isCropping    = false;
+let cropStart     = null;
+let cropCurrent   = null;
+
+// ═══════════════════════════════════════════════════════════════
+// UI REFS
+// ═══════════════════════════════════════════════════════════════
+const imageLoader     = document.getElementById('imageLoader');
+const dropZone        = document.getElementById('dropZone');
+const undoBtn         = document.getElementById('undoBtn');
+const redoBtn         = document.getElementById('redoBtn');
+const downloadBtn     = document.getElementById('downloadBtn');
+const previewBtn       = document.getElementById('previewBtn');
+const copyBtn          = document.getElementById('copyBtn');
+const clearDrawingsBtn = document.getElementById('clearDrawingsBtn');
+const activeToolBadge = document.getElementById('activeTool');
+const infoBar         = document.getElementById('infoBar');
+
+// Format canvas dimensions as "W × Hpx (ratio)"
+function formatDims(w, h) {
+    const ratio = h > 0 ? (w / h).toFixed(2) : '0.00';
+    return `${w} × ${h}px (${ratio})`;
+}
+
+const strokeColorEl   = document.getElementById('strokeColor');
+const fillColorEl     = document.getElementById('fillColor');
+const strokeWidthEl   = document.getElementById('strokeWidth');
+const strokeWidthVal  = document.getElementById('strokeWidthVal');
+const strokeOpacityEl = document.getElementById('strokeOpacity');
+const strokeOpacityVal= document.getElementById('strokeOpacityVal');
+const fillToggle      = document.getElementById('fillToggle');
+const textInputEl     = document.getElementById('textInput');
+const textSizeEl      = document.getElementById('textSize');
+const textFontEl      = document.getElementById('textFont');
+const textBgToggle    = document.getElementById('textBgToggle');
+const textBgSubOpts   = document.getElementById('textBgSubOpts');
+const textBgColorEl   = document.getElementById('textBgColor');
+const textBgOpacityEl = document.getElementById('textBgOpacity');
+const textBgOpacityVal= document.getElementById('textBgOpacityVal');
+const censorBlurEl    = document.getElementById('censorBlur');
+const censorBlurVal   = document.getElementById('censorBlurVal');
+const markerSizeEl    = document.getElementById('markerSize');
+const markerSizeVal   = document.getElementById('markerSizeVal');
+const markerNextVal   = document.getElementById('markerNextVal');
+const resetMarkerBtn  = document.getElementById('resetMarkerBtn');
+const applyCropBtn    = document.getElementById('applyCropBtn');
+const outputFormatEl  = document.getElementById('outputFormat');
+const exportQualityEl = document.getElementById('exportQuality');
+const exportQualityVal= document.getElementById('exportQualityVal');
+
+const resizeModeEl       = document.getElementById('resizeMode');
+const resizeScaleEl      = document.getElementById('resizeScale');
+const resizeScaleVal     = document.getElementById('resizeScaleVal');
+const resizeMaxWidthEl   = document.getElementById('resizeMaxWidth');
+const resizeMaxHeightEl  = document.getElementById('resizeMaxHeight');
+const resizeExactWidthEl = document.getElementById('resizeExactWidth');
+const resizeExactHeightEl= document.getElementById('resizeExactHeight');
+const resizeFitModeEl    = document.getElementById('resizeFitMode');
+const applyResizeBtn     = document.getElementById('applyResizeBtn');
+const zoomLevelValEl     = document.getElementById('zoomLevelVal');
+const resetZoomBtn       = document.getElementById('resetZoomBtn');
+
+// ═══════════════════════════════════════════════════════════════
+// SWATCH COLORS
+// ═══════════════════════════════════════════════════════════════
+const SWATCHES = ['#ff3b3b','#ff9f0a','#ffd60a','#34c759','#30d158','#5ac8fa','#0a84ff','#bf5af2','#ff375f','#ffffff','#8e8e93','#000000'];
+const swatchRow = document.getElementById('swatchRow');
+SWATCHES.forEach(c => {
+    const s = document.createElement('div');
+    s.className = 'color-swatch';
+    s.style.background = c;
+    s.title = c;
+    s.addEventListener('click', () => {
+        strokeColorEl.value = c;
+        fillColorEl.value = c;
+        document.querySelectorAll('.color-swatch').forEach(x => x.classList.remove('active-swatch'));
+        s.classList.add('active-swatch');
+    });
+    swatchRow.appendChild(s);
+});
+
+// ═══════════════════════════════════════════════════════════════
+// RANGE SYNC
+// ═══════════════════════════════════════════════════════════════
+strokeWidthEl.addEventListener('input', () => strokeWidthVal.textContent = strokeWidthEl.value);
+strokeOpacityEl.addEventListener('input', () => strokeOpacityVal.textContent = Math.round(strokeOpacityEl.value*100)+'%');
+censorBlurEl.addEventListener('input', () => censorBlurVal.textContent = censorBlurEl.value+'px');
+markerSizeEl.addEventListener('input', () => markerSizeVal.textContent = markerSizeEl.value+'px');
+exportQualityEl.addEventListener('input', () => exportQualityVal.textContent = exportQualityEl.value+'%');
+resizeScaleEl.addEventListener('input', () => resizeScaleVal.textContent = resizeScaleEl.value+'%');
+textBgOpacityEl.addEventListener('input', () => textBgOpacityVal.textContent = Math.round(textBgOpacityEl.value*100)+'%');
+textBgToggle.addEventListener('change', () => {
+    textBgSubOpts.style.display = textBgToggle.checked ? 'block' : 'none';
+});
+
+function updateResizeSubPanels() {
+    const mode = resizeModeEl.value;
+    document.getElementById('resizeScaleOpts').classList.toggle('visible', mode === 'scale');
+    document.getElementById('resizeMaxWidthOpts').classList.toggle('visible', mode === 'maxWidth');
+    document.getElementById('resizeMaxHeightOpts').classList.toggle('visible', mode === 'maxHeight');
+    document.getElementById('resizeExactOpts').classList.toggle('visible', mode === 'exact');
+}
+resizeModeEl.addEventListener('change', updateResizeSubPanels);
+updateResizeSubPanels();
+
+// ═══════════════════════════════════════════════════════════════
+// TOOL SELECTION
+// ═══════════════════════════════════════════════════════════════
+const TOOL_IDS = ['select','freehand','rect','ellipse','line','arrow','text','marker','censor','crop','resize','bw','rotate-cw','flip','zoom'];
+
+function setTool(name) {
+    // bw and rotate are actions, not persistent tools
+    if (name === 'bw') { applyBW(); return; }
+    if (name === 'rotate-cw')  { applyRotate(90); return; }
+    if (name === 'flip')       { applyFlip(flipDirection); return; }
+
+    const prevTool = activeTool;
+
+    // Exit crop mode if switching away
+    if (activeTool === 'crop' && name !== 'crop') exitCropMode();
+
+    activeTool = name;
+    activeToolBadge.textContent = name;
+
+    // Update button states
+    document.querySelectorAll('.tool-btn').forEach(b => {
+        b.classList.remove('active','active-warn');
+    });
+    const btn = document.getElementById('tool-'+name);
+    if (btn) btn.classList.add('active');
+
+    // Cursor
+    canvas.className = '';
+    overlay.style.pointerEvents = 'none';
+    if (name === 'zoom') { canvas.classList.add('cursor-zoom-in'); }
+    else if (name === 'crop') { canvas.classList.add('cursor-crosshair'); overlay.style.pointerEvents='auto'; }
+    else if (name === 'select' || name === 'resize') { canvas.classList.add('cursor-default'); }
+    else { canvas.classList.add('cursor-crosshair'); }
+
+    // Show/hide tool-specific panels
+    const COLOR_TOOLS = ['freehand','rect','ellipse','line','arrow','text','marker'];
+    const FILL_TOOLS  = ['rect','ellipse'];
+    const FILL_COLOR_TOOLS = ['rect','ellipse','text']; // tools that use the Fill color swatch
+    document.getElementById('colorOpts').classList.toggle('visible', COLOR_TOOLS.includes(name));
+    document.getElementById('strokeOpts').classList.toggle('visible', COLOR_TOOLS.includes(name) && name !== 'marker');
+    document.getElementById('fillOpts').classList.toggle('visible', FILL_TOOLS.includes(name));
+    const needsFillColor = FILL_COLOR_TOOLS.includes(name);
+    document.getElementById('fillColorWrap').style.display = needsFillColor ? 'inline-flex' : 'none';
+    document.getElementById('colorSwatchLabel').textContent = needsFillColor ? 'Stroke \u00A0Fill' : 'Color';
+    document.getElementById('textOpts').classList.toggle('visible', name === 'text');
+    document.getElementById('markerOpts').classList.toggle('visible', name === 'marker');
+    document.getElementById('censorOpts').classList.toggle('visible', name === 'censor');
+    document.getElementById('cropOpts').classList.toggle('visible', name === 'crop');
+    document.getElementById('resizeOpts').classList.toggle('visible', name === 'resize');
+    document.getElementById('zoomOpts').classList.toggle('visible', name === 'zoom');
+
+    // Enter crop mode
+    if (name === 'crop') enterCropMode();
+
+    // Reset zoom/pan when leaving the zoom tool
+    resetZoomOnToolSwitch(prevTool);
+}
+
+TOOL_IDS.forEach(id => {
+    const btn = document.getElementById('tool-'+id);
+    if (btn) btn.addEventListener('click', () => setTool(id));
+});
+setTool('select'); // default
+
+// ═══════════════════════════════════════════════════════════════
+// HISTORY (undo / redo)
+// ═══════════════════════════════════════════════════════════════
+// Snapshots are stored compressed (PNG blobs) instead of raw ImageData.
+// Raw RGBA frames are 4 bytes/pixel — a 2000x2000 image is ~16MB per step,
+// which gets heavy fast across many undo steps. PNG compression is lossless
+// and typically 5-20x smaller for screenshots/annotated images, so we can
+// keep far more history in the same memory footprint.
+const HISTORY_MAX_STEPS  = 40;
+const HISTORY_MAX_BYTES  = 150 * 1024 * 1024; // ~150MB soft cap across all snapshots
+
+function canvasToBlob() {
+    return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+}
+
+let historySaveQueue = Promise.resolve();
+function saveHistory() {
+    // Serialize: each call waits for the previous save to finish before snapshotting,
+    // so two saveHistory() calls in quick succession (with a canvas edit between them)
+    // can't race and lose a step.
+    historySaveQueue = historySaveQueue.then(() => doSaveHistory());
+    return historySaveQueue;
+}
+
+async function doSaveHistory() {
+    if (!sourceImage) return;
+    const myToken = ++historyToken;
+    const blob = await canvasToBlob();
+    if (!blob || myToken !== historyToken) return; // a newer save/undo/redo superseded this one
+
+    // Trim any "future" redo states on a new action
+    if (historyIdx + 1 < history.length) {
+        for (const step of history.slice(historyIdx + 1)) historyBytes -= step.blob.size;
+        history = history.slice(0, historyIdx + 1);
+    }
+
+    history.push({ blob, width: canvas.width, height: canvas.height });
+    historyBytes += blob.size;
+    historyIdx = history.length - 1;
+
+    let trimmed = false;
+    while (history.length > HISTORY_MAX_STEPS || (historyBytes > HISTORY_MAX_BYTES && history.length > 1)) {
+        const dropped = history.shift();
+        historyBytes -= dropped.blob.size;
+        historyIdx--;
+        trimmed = true;
+    }
+    if (trimmed) notifyHistoryTrimmed();
+
+    updateHistoryUI();
+}
+
+function notifyHistoryTrimmed() {
+    if (historyWarned) return;
+    historyWarned = true;
+    showHistoryToast('Undo history is limited — your oldest edits have been dropped to save memory.');
+}
+
+let historyToastTimer = null;
+function showHistoryToast(msg) {
+    const el = document.getElementById('historyToast');
+    const textEl = document.getElementById('historyToastText');
+    if (!el || !textEl) return;
+    textEl.textContent = msg;
+    el.style.opacity = '1';
+    el.style.transform = 'translateX(-50%) translateY(0)';
+    clearTimeout(historyToastTimer);
+    historyToastTimer = setTimeout(() => {
+        el.style.opacity = '0';
+        el.style.transform = 'translateX(-50%) translateY(12px)';
+    }, 4500);
+}
+
+function loadSnapshotIntoCanvas(step) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(step.blob);
+        img.onload = () => {
+            canvas.width = step.width;
+            canvas.height = step.height;
+            if (overlay.width !== step.width || overlay.height !== step.height) {
+                overlay.width = step.width;
+                overlay.height = step.height;
+            }
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+            URL.revokeObjectURL(url);
+            resolve();
+        };
+        img.onerror = (err) => { URL.revokeObjectURL(url); reject(err); };
+        img.src = url;
+    });
+}
+
+async function undo() {
+    if (historyIdx <= 0) return;
+    const myToken = ++historyToken;
+    const targetIdx = historyIdx - 1;
+    await loadSnapshotIntoCanvas(history[targetIdx]);
+    if (myToken !== historyToken) return; // superseded by a later action
+    historyIdx = targetIdx;
+    updateHistoryUI();
+}
+async function redo() {
+    if (historyIdx >= history.length - 1) return;
+    const myToken = ++historyToken;
+    const targetIdx = historyIdx + 1;
+    await loadSnapshotIntoCanvas(history[targetIdx]);
+    if (myToken !== historyToken) return; // superseded by a later action
+    historyIdx = targetIdx;
+    updateHistoryUI();
+}
+function updateHistoryUI() {
+    undoBtn.disabled = historyIdx <= 0;
+    redoBtn.disabled = historyIdx >= history.length - 1;
+}
+
+undoBtn.addEventListener('click', undo);
+redoBtn.addEventListener('click', redo);
+
+// Single-key tool shortcuts (ignored while typing in an input/textarea/select)
+const TOOL_SHORTCUTS = {
+    'v': 'select',
+    'p': 'freehand',
+    'r': 'rect',
+    'o': 'ellipse',
+    'l': 'line',
+    'a': 'arrow',
+    't': 'text',
+    'n': 'marker',
+    'b': 'censor',
+    'c': 'crop',
+    's': 'resize',
+    'w': 'bw',
+    'h': 'flip',
+    'z': 'zoom'
+};
+
+document.addEventListener('keydown', e => {
+    if ((e.ctrlKey||e.metaKey) && e.key==='z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
+    if ((e.ctrlKey||e.metaKey) && (e.key==='y'||(e.key==='z'&&e.shiftKey))) { e.preventDefault(); redo(); return; }
+    if (e.key === 'Escape' && activeTool === 'crop') { exitCropMode(); setTool('select'); return; }
+
+    // Don't hijack keys while the user is typing into a field
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
+
+    if (e.key === '?') { e.preventDefault(); openShortcutsModal(); return; }
+
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!sourceImage) return;
+
+    // Shift+R = Rotate 90° (R alone is Rectangle)
+    if (e.shiftKey && e.key.toLowerCase() === 'r') { e.preventDefault(); setTool('rotate-cw'); return; }
+    if (e.shiftKey) return;
+
+    const key = e.key.toLowerCase();
+    if (TOOL_SHORTCUTS[key]) { e.preventDefault(); setTool(TOOL_SHORTCUTS[key]); }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// LOAD IMAGE
+// ═══════════════════════════════════════════════════════════════
+function loadImage(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+            sourceImage = img;
+            bwMode = false;
+            colorSnapshot = null;
+            currentAngle = 0;
+            document.getElementById('tool-bw').classList.remove('active');
+            renderSource();
+            history = [];
+            historyIdx = -1;
+            historyBytes = 0;
+            historyWarned = false;
+            historyToken++;
+            historySaveQueue = Promise.resolve();
+            saveHistory();
+            updateUI();
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+function renderSource() {
+    if (!sourceImage) return;
+    const w = sourceImage.width;
+    const h = sourceImage.height;
+    canvas.width  = w;
+    canvas.height = h;
+    overlay.width = w;
+    overlay.height = h;
+    ctx.clearRect(0,0,w,h);
+    if (bwMode) {
+        ctx.filter = 'grayscale(100%)';
+        ctx.drawImage(sourceImage,0,0,w,h);
+        ctx.filter = 'none';
+    } else {
+        ctx.drawImage(sourceImage,0,0,w,h);
+    }
+}
+
+function updateUI() {
+    const hasImg = !!sourceImage;
+    emptyState.style.display = hasImg ? 'none' : 'flex';
+    downloadBtn.classList.toggle('d-none', !hasImg);
+    previewBtn.classList.toggle('d-none', !hasImg);
+    copyBtn.classList.toggle('d-none', !hasImg);
+    clearDrawingsBtn.classList.toggle('d-none', !hasImg);
+    document.getElementById('navExportWrap').classList.toggle('visible', hasImg);
+    if (hasImg) infoBar.textContent = formatDims(canvas.width, canvas.height);
+    syncOverlaySize();
+}
+
+// Sync overlay canvas to match the rendered size of mainCanvas
+function syncOverlaySize() {
+    const r  = canvas.getBoundingClientRect();
+    const wr = canvasWrap.getBoundingClientRect();
+    overlay.style.left   = (r.left - wr.left) + 'px';
+    overlay.style.top    = (r.top  - wr.top)  + 'px';
+    overlay.style.width  = r.width  + 'px';
+    overlay.style.height = r.height + 'px';
+    overlay.style.position = 'absolute';
+}
+
+window.addEventListener('resize', syncOverlaySize);
+new ResizeObserver(syncOverlaySize).observe(canvas);
+
+// ═══════════════════════════════════════════════════════════════
+// COORDINATE HELPERS
+// ═══════════════════════════════════════════════════════════════
+function getCanvasCoords(e) {
+    const r   = canvas.getBoundingClientRect();
+    const scX = canvas.width  / r.width;
+    const scY = canvas.height / r.height;
+    const touch = e.touches ? e.touches[0] : e;
+    return {
+        x: (touch.clientX - r.left) * scX,
+        y: (touch.clientY - r.top)  * scY
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ZOOM & PAN (zoom tool)
+// ═══════════════════════════════════════════════════════════════
+function applyZoomTransform() {
+    canvas.style.transform  = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+    overlay.style.transform = canvas.style.transform;
+    // Update cursor hint
+    canvas.classList.remove('cursor-zoom-in','cursor-zoom-out');
+    canvas.classList.add(zoomLevel >= 8 ? 'cursor-zoom-out' : 'cursor-zoom-in');
+    // Live zoom % readout
+    if (zoomLevelValEl) zoomLevelValEl.textContent = Math.round(zoomLevel * 100) + '%';
+}
+
+function resetZoom() {
+    zoomLevel = 1; panX = 0; panY = 0;
+    applyZoomTransform();
+}
+resetZoomBtn && resetZoomBtn.addEventListener('click', resetZoom);
+
+// Mouse wheel zoom (zoom tool only)
+canvasWrap.addEventListener('wheel', e => {
+    if (activeTool !== 'zoom' || !sourceImage) return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.15 : 1/1.15;
+    const newZoom = Math.min(8, Math.max(0.2, zoomLevel * factor));
+
+    // Zoom toward cursor position
+    const wr = canvasWrap.getBoundingClientRect();
+    const cx = e.clientX - wr.left - wr.width/2;
+    const cy = e.clientY - wr.top  - wr.height/2;
+    panX = cx + (panX - cx) * (newZoom / zoomLevel);
+    panY = cy + (panY - cy) * (newZoom / zoomLevel);
+    zoomLevel = newZoom;
+    applyZoomTransform();
+}, { passive: false });
+
+// Click to zoom in, right-click / ctrl-click to zoom out
+canvasWrap.addEventListener('click', e => {
+    if (activeTool !== 'zoom' || !sourceImage) return;
+    if (e.ctrlKey || e.metaKey || e.button === 2) return; // handled elsewhere
+    const factor = e.altKey ? 1/1.5 : 1.5;
+    const newZoom = Math.min(8, Math.max(0.2, zoomLevel * factor));
+    const wr = canvasWrap.getBoundingClientRect();
+    const cx = e.clientX - wr.left - wr.width/2;
+    const cy = e.clientY - wr.top  - wr.height/2;
+    panX = cx + (panX - cx) * (newZoom / zoomLevel);
+    panY = cy + (panY - cy) * (newZoom / zoomLevel);
+    zoomLevel = newZoom;
+    applyZoomTransform();
+});
+
+// Pan: drag in zoom tool
+canvasWrap.addEventListener('mousedown', e => {
+    if (activeTool !== 'zoom' || !sourceImage) return;
+    if (e.button !== 0) return;
+    isPanning = true;
+    panStart = { mx: e.clientX, my: e.clientY, px: panX, py: panY };
+    canvas.classList.remove('cursor-zoom-in','cursor-zoom-out');
+    canvas.classList.add('cursor-grab');
+    e.preventDefault();
+});
+window.addEventListener('mousemove', e => {
+    if (!isPanning) return;
+    panX = panStart.px + (e.clientX - panStart.mx);
+    panY = panStart.py + (e.clientY - panStart.my);
+    applyZoomTransform();
+});
+window.addEventListener('mouseup', e => {
+    if (!isPanning) return;
+    isPanning = false;
+    if (activeTool === 'zoom') {
+        canvas.classList.remove('cursor-grab');
+        canvas.classList.add(zoomLevel >= 8 ? 'cursor-zoom-out' : 'cursor-zoom-in');
+    }
+});
+
+// Double-click to reset zoom
+canvasWrap.addEventListener('dblclick', e => {
+    if (activeTool !== 'zoom' || !sourceImage) return;
+    resetZoom();
+});
+
+// Pinch-to-zoom (touch) — anchors on the midpoint between fingers so the
+// image doesn't drift, and supports two-finger pan while pinching.
+let pinchMid = null; // {x, y} midpoint in canvasWrap-relative coords, screen space
+canvasWrap.addEventListener('touchstart', e => {
+    if (activeTool !== 'zoom' || e.touches.length !== 2) { lastPinchDist = null; pinchMid = null; return; }
+    lastPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+    );
+    const wr = canvasWrap.getBoundingClientRect();
+    pinchMid = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2 - wr.left - wr.width / 2,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2 - wr.top  - wr.height / 2
+    };
+}, { passive: true });
+canvasWrap.addEventListener('touchmove', e => {
+    if (activeTool !== 'zoom' || e.touches.length !== 2 || lastPinchDist === null) return;
+    e.preventDefault();
+    const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+    );
+    const wr = canvasWrap.getBoundingClientRect();
+    const newMid = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2 - wr.left - wr.width / 2,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2 - wr.top  - wr.height / 2
+    };
+
+    const factor = dist / lastPinchDist;
+    const newZoom = Math.min(8, Math.max(0.2, zoomLevel * factor));
+
+    // Keep the pinch midpoint visually anchored as the scale changes...
+    panX = newMid.x + (panX - pinchMid.x) * (newZoom / zoomLevel);
+    panY = newMid.y + (panY - pinchMid.y) * (newZoom / zoomLevel);
+    // ...and follow the midpoint itself so two-finger drag also pans.
+    zoomLevel = newZoom;
+    lastPinchDist = dist;
+    pinchMid = newMid;
+    applyZoomTransform();
+}, { passive: false });
+canvasWrap.addEventListener('touchend', e => {
+    if (e.touches.length < 2) { lastPinchDist = null; pinchMid = null; }
+});
+
+// Reset zoom when switching away from the zoom tool
+function resetZoomOnToolSwitch(prevTool) {
+    if (prevTool === 'zoom' && zoomLevel !== 1) resetZoom();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DRAW HELPERS
+// ═══════════════════════════════════════════════════════════════
+function applyStrokeStyle(context) {
+    context.strokeStyle = hexToRgba(strokeColorEl.value, parseFloat(strokeOpacityEl.value));
+    context.fillStyle   = hexToRgba(fillColorEl.value,   parseFloat(strokeOpacityEl.value));
+    context.lineWidth   = parseInt(strokeWidthEl.value);
+    context.lineCap     = 'round';
+    context.lineJoin    = 'round';
+}
+
+function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1,3),16);
+    const g = parseInt(hex.slice(3,5),16);
+    const b = parseInt(hex.slice(5,7),16);
+    return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Draw the "live" shape on the overlay while dragging
+function drawLiveShape(start, cur) {
+    octx.clearRect(0,0,overlay.width,overlay.height);
+    applyStrokeStyle(octx);
+    const dx = cur.x - start.x;
+    const dy = cur.y - start.y;
+    octx.beginPath();
+    if (activeTool === 'rect') {
+        octx.rect(start.x, start.y, dx, dy);
+    } else if (activeTool === 'ellipse') {
+        octx.ellipse(start.x + dx/2, start.y + dy/2, Math.abs(dx/2), Math.abs(dy/2), 0, 0, Math.PI*2);
+    } else if (activeTool === 'line') {
+        octx.moveTo(start.x, start.y);
+        octx.lineTo(cur.x, cur.y);
+    } else if (activeTool === 'arrow') {
+        drawArrow(octx, start.x, start.y, cur.x, cur.y);
+    }
+    octx.stroke();
+    if (fillToggle.checked && (activeTool==='rect'||activeTool==='ellipse')) octx.fill();
+}
+
+function drawArrow(c, x1, y1, x2, y2) {
+    const angle = Math.atan2(y2-y1, x2-x1);
+    const head  = Math.max(10, parseInt(strokeWidthEl.value)*3);
+    c.moveTo(x1,y1);
+    c.lineTo(x2,y2);
+    c.lineTo(x2 - head*Math.cos(angle-Math.PI/7), y2 - head*Math.sin(angle-Math.PI/7));
+    c.moveTo(x2,y2);
+    c.lineTo(x2 - head*Math.cos(angle+Math.PI/7), y2 - head*Math.sin(angle+Math.PI/7));
+}
+
+// Commit shape from overlay to main canvas
+function commitShape(start, cur) {
+    applyStrokeStyle(ctx);
+    const dx = cur.x - start.x;
+    const dy = cur.y - start.y;
+    ctx.beginPath();
+    if (activeTool === 'rect') {
+        ctx.rect(start.x, start.y, dx, dy);
+    } else if (activeTool === 'ellipse') {
+        ctx.ellipse(start.x + dx/2, start.y + dy/2, Math.abs(dx/2), Math.abs(dy/2), 0, 0, Math.PI*2);
+    } else if (activeTool === 'line') {
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(cur.x, cur.y);
+    } else if (activeTool === 'arrow') {
+        drawArrow(ctx, start.x, start.y, cur.x, cur.y);
+    }
+    ctx.stroke();
+    if (fillToggle.checked && (activeTool==='rect'||activeTool==='ellipse')) ctx.fill();
+    octx.clearRect(0,0,overlay.width,overlay.height);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FREEHAND DRAWING
+// ═══════════════════════════════════════════════════════════════
+function freehandMove(coords) {
+    if (!isDrawing || !lastPoint) return;
+    applyStrokeStyle(ctx);
+    ctx.beginPath();
+    ctx.moveTo(lastPoint.x, lastPoint.y);
+    ctx.lineTo(coords.x, coords.y);
+    ctx.stroke();
+    lastPoint = coords;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TEXT TOOL
+// ═══════════════════════════════════════════════════════════════
+function placeText(coords) {
+    const text = textInputEl.value.trim() || 'Text';
+    const size = parseInt(textSizeEl.value) || 24;
+    const font = textFontEl.value;
+    const opacity = parseFloat(strokeOpacityEl.value);
+    // Text outline needs to stay thin relative to its size, regardless of the
+    // shared Stroke Width slider (which is tuned for shapes/lines and would
+    // otherwise render illegibly thick text outlines).
+    const lineW = Math.min(parseInt(strokeWidthEl.value), Math.max(1, Math.round(size * 0.06)));
+
+    ctx.font = `${size}px ${font}`;
+    ctx.textBaseline = 'alphabetic';
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
+
+    // Background — drawn first so text stays legible over busy photos
+    if (textBgToggle.checked) {
+        const metrics = ctx.measureText(text);
+        const textW = metrics.width;
+        const ascent  = metrics.actualBoundingBoxAscent  || size * 0.8;
+        const descent = metrics.actualBoundingBoxDescent || size * 0.2;
+        const padX = size * 0.35;
+        const padY = size * 0.25;
+
+        const boxX = coords.x - padX;
+        const boxY = coords.y - ascent - padY;
+        const boxW = textW + padX * 2;
+        const boxH = ascent + descent + padY * 2;
+        const radius = Math.min(size * 0.2, boxH / 2, boxW / 2);
+
+        ctx.fillStyle = hexToRgba(textBgColorEl.value, parseFloat(textBgOpacityEl.value));
+        ctx.beginPath();
+        ctx.roundRect(boxX, boxY, boxW, boxH, radius);
+        ctx.fill();
+    }
+
+    // Outline (stroke) — width comes from the Stroke Width slider
+    if (lineW > 0) {
+        ctx.strokeStyle = hexToRgba(strokeColorEl.value, opacity);
+        ctx.lineWidth = lineW;
+        ctx.strokeText(text, coords.x, coords.y);
+    }
+
+    // Fill
+    ctx.fillStyle = hexToRgba(fillColorEl.value, opacity);
+    ctx.fillText(text, coords.x, coords.y);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// NUMBERED MARKER TOOL
+// ═══════════════════════════════════════════════════════════════
+function placeMarker(coords) {
+    const size   = parseInt(markerSizeEl.value) || 40;
+    const radius = size / 2;
+    const fill   = strokeColorEl.value;
+    const label  = String(markerCount);
+
+    // Pin circle with a subtle dark outline so it reads on any background
+    ctx.beginPath();
+    ctx.arc(coords.x, coords.y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, radius * 0.12);
+    ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+    ctx.stroke();
+
+    // Number, auto-sized to the circle, centered
+    ctx.font = `700 ${Math.round(radius * 1.1)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffffff';
+    ctx.lineWidth = Math.max(1, radius * 0.08);
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.strokeText(label, coords.x, coords.y + 1);
+    ctx.fillText(label, coords.x, coords.y + 1);
+
+    // Reset alignment defaults so other tools aren't affected
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+
+    markerCount++;
+    markerNextVal.textContent = markerCount;
+}
+
+resetMarkerBtn.addEventListener('click', () => {
+    markerCount = 1;
+    markerNextVal.textContent = markerCount;
+});
+
+// ═══════════════════════════════════════════════════════════════
+// CENSOR TOOL
+// ═══════════════════════════════════════════════════════════════
+function applyCensorRect(x, y, w, h) {
+    const blur = parseInt(censorBlurEl.value) || 20;
+    const padX = blur * 2;
+    const padY = blur * 2;
+    const sx = Math.max(0, x - padX);
+    const sy = Math.max(0, y - padY);
+    const sw = Math.min(canvas.width - sx,  Math.abs(w) + padX*2);
+    const sh = Math.min(canvas.height - sy, Math.abs(h) + padY*2);
+
+    // Draw source region at a tiny size then upscale (pixelate-style)
+    const tmp = document.createElement('canvas');
+    tmp.width  = Math.max(1, Math.round(sw / blur));
+    tmp.height = Math.max(1, Math.round(sh / blur));
+    const tc = tmp.getContext('2d');
+    tc.imageSmoothingEnabled = true;
+    tc.drawImage(canvas, sx, sy, sw, sh, 0, 0, tmp.width, tmp.height);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tmp, 0, 0, tmp.width, tmp.height, sx, sy, sw, sh);
+    ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// B&W TOGGLE
+// ═══════════════════════════════════════════════════════════════
+// (colorSnapshot declared in STATE section above)
+
+function applyBW() {
+    if (!sourceImage) return;
+
+    if (!bwMode) {
+        // Going B&W: save the current color state, then desaturate
+        colorSnapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        saveHistory();
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = imgData.data;
+        for (let i = 0; i < d.length; i += 4) {
+            const g = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+            d[i] = d[i+1] = d[i+2] = g;
+        }
+        ctx.putImageData(imgData, 0, 0);
+        bwMode = true;
+        saveHistory();
+    } else {
+        // Reverting to color: restore the saved color snapshot
+        if (colorSnapshot) {
+            saveHistory();
+            ctx.putImageData(colorSnapshot, 0, 0);
+            colorSnapshot = null;
+            saveHistory();
+        }
+        bwMode = false;
+    }
+    document.getElementById('tool-bw').classList.toggle('active', bwMode);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ROTATE
+// ═══════════════════════════════════════════════════════════════
+function applyRotate(deg) {
+    if (!sourceImage) return;
+    saveHistory();
+    const angle = deg * Math.PI / 180;
+    const srcW = canvas.width, srcH = canvas.height;
+    const newW = (deg === 90 || deg === -90) ? srcH : srcW;
+    const newH = (deg === 90 || deg === -90) ? srcW : srcH;
+
+    const tmp = document.createElement('canvas');
+    tmp.width  = newW;
+    tmp.height = newH;
+    const tc = tmp.getContext('2d');
+    tc.translate(newW/2, newH/2);
+    tc.rotate(angle);
+    tc.drawImage(canvas, -srcW/2, -srcH/2);
+
+    canvas.width  = newW;
+    canvas.height = newH;
+    overlay.width  = newW;
+    overlay.height = newH;
+    ctx.drawImage(tmp, 0, 0);
+    syncOverlaySize();
+    infoBar.textContent = formatDims(canvas.width, canvas.height);
+    saveHistory();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FLIP (mirror)
+// ═══════════════════════════════════════════════════════════════
+function applyFlip(axis) {
+    if (!sourceImage) return;
+    saveHistory();
+    const w = canvas.width, h = canvas.height;
+
+    const tmp = document.createElement('canvas');
+    tmp.width  = w;
+    tmp.height = h;
+    const tc = tmp.getContext('2d');
+    if (axis === 'h') {
+        tc.translate(w, 0);
+        tc.scale(-1, 1);
+    } else {
+        tc.translate(0, h);
+        tc.scale(1, -1);
+    }
+    tc.drawImage(canvas, 0, 0);
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(tmp, 0, 0);
+    saveHistory();
+}
+
+// Direction toggle (Horizontal / Vertical) — just sets which way the
+// Flip button / H shortcut will mirror next; doesn't flip anything itself.
+const flipDirHBtn = document.getElementById('flipDirH');
+const flipDirVBtn = document.getElementById('flipDirV');
+function setFlipDirection(dir) {
+    flipDirection = dir;
+    flipDirHBtn.classList.toggle('active', dir === 'h');
+    flipDirVBtn.classList.toggle('active', dir === 'v');
+    const flipIcon = document.querySelector('#tool-flip i');
+    if (flipIcon) flipIcon.className = dir === 'h' ? 'bi bi-symmetry-vertical' : 'bi bi-symmetry-horizontal';
+}
+flipDirHBtn.addEventListener('click', () => setFlipDirection('h'));
+flipDirVBtn.addEventListener('click', () => setFlipDirection('v'));
+
+// ═══════════════════════════════════════════════════════════════
+// RESIZE
+// ═══════════════════════════════════════════════════════════════
+function computeResizeTarget() {
+    const srcW = canvas.width, srcH = canvas.height;
+    const mode = resizeModeEl.value;
+
+    if (mode === 'scale') {
+        const pct = Math.max(1, parseFloat(resizeScaleEl.value) || 100) / 100;
+        return {
+            w: Math.max(1, Math.round(srcW * pct)),
+            h: Math.max(1, Math.round(srcH * pct)),
+            fit: 'stretch' // scale preserves ratio by definition, no fit logic needed
+        };
+    }
+    if (mode === 'maxWidth') {
+        const maxW = Math.max(1, parseInt(resizeMaxWidthEl.value, 10) || srcW);
+        const ratio = srcH / srcW;
+        const w = Math.min(maxW, srcW > 0 ? maxW : srcW);
+        return {
+            w: maxW,
+            h: Math.max(1, Math.round(maxW * ratio)),
+            fit: 'stretch'
+        };
+    }
+    if (mode === 'maxHeight') {
+        const maxH = Math.max(1, parseInt(resizeMaxHeightEl.value, 10) || srcH);
+        const ratio = srcW / srcH;
+        return {
+            w: Math.max(1, Math.round(maxH * ratio)),
+            h: maxH,
+            fit: 'stretch'
+        };
+    }
+    // exact
+    const w = Math.max(1, parseInt(resizeExactWidthEl.value, 10) || srcW);
+    const h = Math.max(1, parseInt(resizeExactHeightEl.value, 10) || srcH);
+    return { w, h, fit: resizeFitModeEl.value };
+}
+
+function applyResize() {
+    if (!sourceImage) return;
+    const srcW = canvas.width, srcH = canvas.height;
+    const { w: targetW, h: targetH, fit } = computeResizeTarget();
+    if (targetW < 1 || targetH < 1) return;
+    if (targetW === srcW && targetH === srcH) return;
+
+    saveHistory();
+
+    // Snapshot current canvas pixels as the resize source
+    const srcCanvas = document.createElement('canvas');
+    srcCanvas.width = srcW;
+    srcCanvas.height = srcH;
+    srcCanvas.getContext('2d').drawImage(canvas, 0, 0);
+
+    const tmp = document.createElement('canvas');
+    tmp.width = targetW;
+    tmp.height = targetH;
+    const tc = tmp.getContext('2d');
+    tc.imageSmoothingEnabled = true;
+    tc.imageSmoothingQuality = 'high';
+
+    if (fit === 'stretch') {
+        // Ignore aspect ratio entirely — map src directly onto target box
+        tc.drawImage(srcCanvas, 0, 0, srcW, srcH, 0, 0, targetW, targetH);
+    } else if (fit === 'fit') {
+        // Contain: scale to fit entirely within target box, letterbox the rest (transparent)
+        const scale = Math.min(targetW / srcW, targetH / srcH);
+        const dw = Math.round(srcW * scale);
+        const dh = Math.round(srcH * scale);
+        const dx = Math.round((targetW - dw) / 2);
+        const dy = Math.round((targetH - dh) / 2);
+        tc.drawImage(srcCanvas, 0, 0, srcW, srcH, dx, dy, dw, dh);
+    } else {
+        // fill: cover the target box, keep ratio, crop overflow
+        const scale = Math.max(targetW / srcW, targetH / srcH);
+        const dw = srcW * scale;
+        const dh = srcH * scale;
+        const dx = (targetW - dw) / 2;
+        const dy = (targetH - dh) / 2;
+        tc.drawImage(srcCanvas, 0, 0, srcW, srcH, dx, dy, dw, dh);
+    }
+
+    canvas.width  = targetW;
+    canvas.height = targetH;
+    overlay.width  = targetW;
+    overlay.height = targetH;
+    ctx.clearRect(0, 0, targetW, targetH);
+    ctx.drawImage(tmp, 0, 0);
+    syncOverlaySize();
+    infoBar.textContent = formatDims(canvas.width, canvas.height);
+    saveHistory();
+}
+
+applyResizeBtn.addEventListener('click', applyResize);
+
+
+function enterCropMode() {
+    isCropping = false;
+    cropStart = cropCurrent = null;
+    cropOverlayEl.style.display = 'block';
+    cropBoxEl.style.display = 'none';
+}
+function exitCropMode() {
+    isCropping = false;
+    cropStart = cropCurrent = null;
+    cropOverlayEl.style.display = 'none';
+    cropBoxEl.style.display = 'none';
+}
+
+function updateCropBox() {
+    if (!cropStart || !cropCurrent) return;
+    const r   = canvas.getBoundingClientRect();
+    const wr  = canvasWrap.getBoundingClientRect();
+    const scX = r.width  / canvas.width;
+    const scY = r.height / canvas.height;
+
+    const x = Math.min(cropStart.x, cropCurrent.x) * scX + (r.left - wr.left);
+    const y = Math.min(cropStart.y, cropCurrent.y) * scY + (r.top  - wr.top);
+    const w = Math.abs(cropCurrent.x - cropStart.x) * scX;
+    const h = Math.abs(cropCurrent.y - cropStart.y) * scY;
+
+    cropBoxEl.style.left   = x + 'px';
+    cropBoxEl.style.top    = y + 'px';
+    cropBoxEl.style.width  = w + 'px';
+    cropBoxEl.style.height = h + 'px';
+    cropBoxEl.style.display = 'block';
+}
+
+applyCropBtn.addEventListener('click', () => {
+    if (!cropStart || !cropCurrent) return;
+    saveHistory();
+    const x = Math.round(Math.min(cropStart.x, cropCurrent.x));
+    const y = Math.round(Math.min(cropStart.y, cropCurrent.y));
+    const w = Math.round(Math.abs(cropCurrent.x - cropStart.x));
+    const h = Math.round(Math.abs(cropCurrent.y - cropStart.y));
+    if (w < 4 || h < 4) return;
+
+    const imgData = ctx.getImageData(x, y, w, h);
+    canvas.width  = w;
+    canvas.height = h;
+    overlay.width  = w;
+    overlay.height = h;
+    ctx.putImageData(imgData, 0, 0);
+    syncOverlaySize();
+    infoBar.textContent = formatDims(w, h);
+    saveHistory();
+    exitCropMode();
+    setTool('select');
+});
+
+// ═══════════════════════════════════════════════════════════════
+// CANVAS EVENT HANDLERS
+// ═══════════════════════════════════════════════════════════════
+function onPointerDown(e) {
+    if (!sourceImage || e.button !== 0 && !e.touches) return;
+    e.preventDefault();
+    const coords = getCanvasCoords(e);
+
+    if (activeTool === 'crop') {
+        isCropping = true;
+        cropStart = cropCurrent = coords;
+        cropBoxEl.style.display = 'none';
+        return;
+    }
+    if (activeTool === 'select' || activeTool === 'zoom' || activeTool === 'resize') return;
+
+    isDrawing = true;
+    drawStart = coords;
+    lastPoint = coords;
+
+    if (activeTool === 'text') {
+        saveHistory();
+        placeText(coords);
+        saveHistory();
+        isDrawing = false;
+    } else if (activeTool === 'marker') {
+        saveHistory();
+        placeMarker(coords);
+        saveHistory();
+        isDrawing = false;
+    }
+}
+
+function onPointerMove(e) {
+    e.preventDefault();
+    const coords = getCanvasCoords(e);
+
+    if (activeTool === 'crop' && isCropping) {
+        cropCurrent = coords;
+        updateCropBox();
+        return;
+    }
+    if (!isDrawing) return;
+
+    if (activeTool === 'freehand') {
+        freehandMove(coords);
+    } else if (['rect','ellipse','line','arrow'].includes(activeTool)) {
+        drawLiveShape(drawStart, coords);
+    } else if (activeTool === 'censor') {
+        // Show live preview on overlay
+        octx.clearRect(0,0,overlay.width,overlay.height);
+        octx.strokeStyle = 'rgba(245,158,11,0.8)';
+        octx.lineWidth = 1;
+        octx.setLineDash([4,3]);
+        const dx = coords.x - drawStart.x;
+        const dy = coords.y - drawStart.y;
+        octx.strokeRect(drawStart.x, drawStart.y, dx, dy);
+        octx.setLineDash([]);
+    }
+}
+
+function onPointerUp(e) {
+    const coords = getCanvasCoords(e);
+
+    if (activeTool === 'crop') {
+        isCropping = false;
+        return;
+    }
+    if (!isDrawing) return;
+    isDrawing = false;
+
+    if (activeTool === 'freehand') {
+        saveHistory();
+    } else if (['rect','ellipse','line','arrow'].includes(activeTool)) {
+        saveHistory();
+        commitShape(drawStart, coords);
+        saveHistory();
+    } else if (activeTool === 'censor') {
+        const x = Math.min(drawStart.x, coords.x);
+        const y = Math.min(drawStart.y, coords.y);
+        const w = Math.abs(coords.x - drawStart.x);
+        const h = Math.abs(coords.y - drawStart.y);
+        if (w > 4 && h > 4) {
+            saveHistory();
+            applyCensorRect(x, y, w, h);
+            saveHistory();
+        }
+        octx.clearRect(0,0,overlay.width,overlay.height);
+    }
+    drawStart = null;
+    lastPoint = null;
+}
+
+canvas.addEventListener('mousedown',  onPointerDown);
+canvas.addEventListener('mousemove',  onPointerMove);
+canvas.addEventListener('mouseup',    onPointerUp);
+canvas.addEventListener('mouseleave', onPointerUp);
+canvas.addEventListener('touchstart', e => onPointerDown(e), {passive:false});
+canvas.addEventListener('touchmove',  e => onPointerMove(e), {passive:false});
+canvas.addEventListener('touchend',   e => onPointerUp(e));
+
+// overlay handles crop draw
+overlay.addEventListener('mousedown',  onPointerDown);
+overlay.addEventListener('mousemove',  onPointerMove);
+overlay.addEventListener('mouseup',    onPointerUp);
+
+// ═══════════════════════════════════════════════════════════════
+// CLEAR DRAWINGS
+// ═══════════════════════════════════════════════════════════════
+clearDrawingsBtn.addEventListener('click', () => {
+    if (!sourceImage) return;
+    if (!confirm('Remove all drawings and reset to the original image?')) return;
+    saveHistory();
+    renderSource();
+    saveHistory();
+});
+
+// ═══════════════════════════════════════════════════════════════
+// PREVIEW (Original vs Edited)
+// ═══════════════════════════════════════════════════════════════
+const previewModalEl     = document.getElementById('previewModal');
+const previewOriginalImg = document.getElementById('previewOriginalImg');
+const previewEditedImg   = document.getElementById('previewEditedImg');
+const previewOriginalDims= document.getElementById('previewOriginalDims');
+const previewEditedDims  = document.getElementById('previewEditedDims');
+let previewModalInstance = null;
+
+previewBtn.addEventListener('click', () => {
+    if (!sourceImage) return;
+
+    previewOriginalImg.src = sourceImage.src;
+    previewOriginalDims.textContent = formatDims(sourceImage.width, sourceImage.height);
+
+    previewEditedImg.src = canvas.toDataURL('image/png');
+    previewEditedDims.textContent = formatDims(canvas.width, canvas.height);
+
+    if (!previewModalInstance) previewModalInstance = new bootstrap.Modal(previewModalEl);
+    previewModalInstance.show();
+});
+
+// ═══════════════════════════════════════════════════════════════
+// KEYBOARD SHORTCUTS CHEAT SHEET
+// ═══════════════════════════════════════════════════════════════
+const shortcutsModalEl = document.getElementById('shortcutsModal');
+const shortcutsBtn      = document.getElementById('shortcutsBtn');
+let shortcutsModalInstance = null;
+
+function openShortcutsModal() {
+    if (!shortcutsModalInstance) shortcutsModalInstance = new bootstrap.Modal(shortcutsModalEl);
+    shortcutsModalInstance.show();
+}
+shortcutsBtn.addEventListener('click', openShortcutsModal);
+
+// ═══════════════════════════════════════════════════════════════
+// EXPORT
+// ═══════════════════════════════════════════════════════════════
+downloadBtn.addEventListener('click', () => {
+    const fmt = outputFormatEl.value;
+    const ext = fmt === 'image/jpeg' ? 'jpg' : fmt === 'image/webp' ? 'webp' : 'png';
+    const q   = parseFloat(exportQualityEl.value) / 100;
+    const url = fmt === 'image/png' ? canvas.toDataURL('image/png') : canvas.toDataURL(fmt, q);
+    const a   = document.createElement('a');
+    a.href     = url;
+    a.download = `edited.${ext}`;
+    a.click();
+});
+
+// Copy current canvas (with all edits) to the clipboard as PNG.
+//
+// Why not honor the JPEG/WebP dropdown here: the OS clipboard's image slot
+// only accepts PNG (and in some browsers SVG) — this is a hard restriction
+// in the Async Clipboard API spec, not a bug. Chrome *can* write a
+// "web image/jpeg" custom format, but that's only readable by another web
+// page that explicitly asks for it via the same API; pasting into a normal
+// app (Photos, Mail, Slack, a Word doc, etc.) would show nothing at all.
+// PNG is the only format guaranteed to paste correctly everywhere, so Copy
+// always uses it regardless of the export format dropdown.
+copyBtn.addEventListener('click', async () => {
+    if (!sourceImage) return;
+    if (!navigator.clipboard || typeof ClipboardItem === 'undefined') {
+        alert('Copy to clipboard isn\'t supported in this browser.');
+        return;
+    }
+    try {
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (!blob) throw new Error('Could not read canvas');
+        await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blob }) ]);
+
+        const icon = copyBtn.querySelector('i');
+        const originalIcon = icon.className;
+        icon.className = 'bi bi-clipboard-check me-1';
+        copyBtn.classList.add('copied');
+        copyBtn.lastChild.textContent = 'Copied!';
+        setTimeout(() => {
+            icon.className = originalIcon;
+            copyBtn.classList.remove('copied');
+            copyBtn.lastChild.textContent = 'Copy';
+        }, 1500);
+    } catch (err) {
+        console.error('Copy to clipboard failed:', err);
+        alert('Could not copy the image to the clipboard.');
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// FILE LOADING
+// ═══════════════════════════════════════════════════════════════
+imageLoader.addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (f) loadImage(f);
+});
+
+// Paste an image from the clipboard (Ctrl+V / Cmd+V)
+document.addEventListener('paste', e => {
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return; // let normal text paste happen
+
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (const item of items) {
+        if (item.type && item.type.startsWith('image/')) {
+            e.preventDefault();
+            const file = item.getAsFile();
+            if (file) loadImage(file);
+            return;
+        }
+    }
+});
+
+dropZone.addEventListener('click', e => {
+    if (e.target !== imageLoader) imageLoader.click();
+});
+['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    dropZone.classList.add('drag-over');
+}));
+['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    dropZone.classList.remove('drag-over');
+}));
+dropZone.addEventListener('drop', e => {
+    const files = Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/'));
+    if (files[0]) loadImage(files[0]);
+});
+
+// Canvas area drop
+canvasWrap.addEventListener('dragenter', e => { e.preventDefault(); canvasWrap.classList.add('drag-over-canvas'); });
+canvasWrap.addEventListener('dragover',  e => { e.preventDefault(); });
+canvasWrap.addEventListener('dragleave', e => { if (!canvasWrap.contains(e.relatedTarget)) canvasWrap.classList.remove('drag-over-canvas'); });
+canvasWrap.addEventListener('drop', e => {
+    e.preventDefault(); canvasWrap.classList.remove('drag-over-canvas');
+    const files = Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/'));
+    if (files[0]) loadImage(files[0]);
+});
+
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop',     e => e.preventDefault());
+</script>
+</body>
+</html>
