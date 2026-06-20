@@ -178,6 +178,31 @@
             border-color: var(--accent) !important;
             color: var(--accent) !important;
         }
+        .img-nav-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            font-size: 1.15rem;
+            line-height: 1;
+            padding: 0;
+            border-radius: 7px;
+            background: var(--accent-dim);
+            border: 1px solid var(--accent-dim);
+            color: #ffffff;
+            transition: all 0.15s;
+        }
+        .img-nav-btn:hover:not(:disabled) {
+            background: #0284c7;
+            border-color: #0284c7;
+        }
+        .img-nav-btn:disabled {
+            opacity: 0.35;
+            background: #1e2535 !important;
+            border-color: #374151 !important;
+            color: #64748b !important;
+        }
         #undoBtn {
             background: #f59e0b;
             border: 1px solid #f59e0b;
@@ -284,9 +309,11 @@
 
         /* Info bar */
         #infoBar {
-            font-size: 0.8rem;
-            color: #a6b3c5;
+            font-size: 0.98rem;
+            font-weight: 600;
+            color: #e2e8f0;
             font-variant-numeric: tabular-nums;
+            letter-spacing: 0.01em;
         }
 
         /* Empty state */
@@ -372,8 +399,8 @@
                 <!-- Image load -->
                 <p class="section-label">Image</p>
                 <div id="dropZone" class="mb-3">
-                    <input type="file" id="imageLoader" accept="image/*" class="form-control bg-dark text-light border-secondary form-control-sm">
-                    <div class="drop-hint"><i class="bi bi-cloud-upload"></i> drag &amp; drop, or paste (Ctrl+V)</div>
+                    <input type="file" id="imageLoader" accept="image/*" multiple class="form-control bg-dark text-light border-secondary form-control-sm">
+                    <div class="drop-hint"><i class="bi bi-cloud-upload"></i> drag &amp; drop (multiple ok), or paste (Ctrl+V)</div>
                 </div>
 
                 <!-- Tool grid -->
@@ -581,6 +608,10 @@
             <div class="card-header panel-header py-2 d-flex align-items-center justify-content-between gap-2 flex-wrap">
                 <div class="d-flex align-items-center gap-2">
                     <h6 class="mb-0 small fw-bold text-info text-uppercase" style="letter-spacing:.07em;"><i class="bi bi-image me-2"></i>Canvas</h6>
+                    <div id="imageNavGroup" class="d-flex align-items-center gap-2 d-none">
+                        <button id="prevImageBtn" class="btn img-nav-btn" title="Previous image (←)"><i class="bi bi-chevron-left"></i></button>
+                        <button id="nextImageBtn" class="btn img-nav-btn" title="Next image (→)"><i class="bi bi-chevron-right"></i></button>
+                    </div>
                     <span id="infoBar" class="ms-1">— open an image to begin</span>
                 </div>
                 <div class="d-flex align-items-center gap-2">
@@ -671,6 +702,7 @@
                     <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Undo</span><kbd>Ctrl</kbd>+<kbd>Z</kbd></div>
                     <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Redo</span><kbd>Ctrl</kbd>+<kbd>Y</kbd></div>
                     <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Paste image</span><kbd>Ctrl</kbd>+<kbd>V</kbd></div>
+                    <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Next / previous image</span><kbd>→</kbd> <kbd>←</kbd></div>
                     <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Cancel crop</span><kbd>Esc</kbd></div>
                     <div class="col-6 d-flex justify-content-between align-items-center py-1"><span>Show this cheat sheet</span><kbd>?</kbd></div>
                 </div>
@@ -697,7 +729,7 @@ const cropOverlayEl = document.getElementById('cropOverlay');
 const cropBoxEl     = document.getElementById('cropBox');
 const emptyState    = document.getElementById('emptyState');
 
-let sourceImage   = null;   // original HTMLImageElement
+let sourceImage   = null;   // original HTMLImageElement (of the *active* image)
 let bwMode        = false;
 let colorSnapshot = null;   // ImageData saved before B&W conversion
 let currentAngle  = 0;      // 0, 90, 180, 270
@@ -709,6 +741,12 @@ let historyBytes  = 0;      // running total of compressed bytes currently held
 let historyWarned = false;  // whether we've already told the user about trimming
 let historyToken  = 0;      // bumped on every history mutation; guards stale async writes
 let markerCount   = 1;      // next numbered marker label
+
+// Multi-image support: each loaded file gets its own slot below, holding
+// everything above (sourceImage, history, bwMode, etc.) so edits to one
+// image are preserved while another is being viewed/edited.
+let images            = [];   // { name, sourceImage, bwMode, colorSnapshot, currentAngle, markerCount, history, historyIdx, historyBytes, historyWarned }
+let currentImageIndex = -1;
 
 // Zoom / pan state (CSS transform on canvas)
 let zoomLevel  = 1;
@@ -741,6 +779,9 @@ const copyBtn          = document.getElementById('copyBtn');
 const clearDrawingsBtn = document.getElementById('clearDrawingsBtn');
 const activeToolBadge = document.getElementById('activeTool');
 const infoBar         = document.getElementById('infoBar');
+const imageNavGroup   = document.getElementById('imageNavGroup');
+const prevImageBtn    = document.getElementById('prevImageBtn');
+const nextImageBtn    = document.getElementById('nextImageBtn');
 
 // Format canvas dimensions as "W × Hpx (ratio)"
 function formatDims(w, h) {
@@ -1041,6 +1082,8 @@ document.addEventListener('keydown', e => {
     if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
 
     if (e.key === '?') { e.preventDefault(); openShortcutsModal(); return; }
+    if (e.key === 'ArrowLeft'  && images.length > 1) { e.preventDefault(); prevImageBtn.click(); return; }
+    if (e.key === 'ArrowRight' && images.length > 1) { e.preventDefault(); nextImageBtn.click(); return; }
 
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (!sourceImage) return;
@@ -1054,33 +1097,153 @@ document.addEventListener('keydown', e => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// LOAD IMAGE
+// LOAD IMAGE(S) — supports loading & switching between multiple files
 // ═══════════════════════════════════════════════════════════════
-function loadImage(file) {
-    if (!file || !file.type.startsWith('image/')) return;
-    const reader = new FileReader();
-    reader.onload = e => {
-        const img = new Image();
-        img.onload = () => {
-            sourceImage = img;
-            bwMode = false;
-            colorSnapshot = null;
-            currentAngle = 0;
-            document.getElementById('tool-bw').classList.remove('active');
-            renderSource();
-            history = [];
-            historyIdx = -1;
-            historyBytes = 0;
-            historyWarned = false;
-            historyToken++;
-            historySaveQueue = Promise.resolve();
-            saveHistory();
-            updateUI();
+// Reads one File into a fresh per-image state object (its own undo
+// history, B&W/rotation state, etc.) without touching whichever image
+// is currently active on the canvas.
+function readImageFile(file) {
+    return new Promise(resolve => {
+        if (!file || !file.type || !file.type.startsWith('image/')) { resolve(null); return; }
+        const reader = new FileReader();
+        reader.onload = e => {
+            const img = new Image();
+            img.onload = () => {
+                resolve({
+                    name: file.name || 'image',
+                    sourceImage: img,
+                    bwMode: false,
+                    colorSnapshot: null,
+                    currentAngle: 0,
+                    markerCount: 1,
+                    history: [],
+                    historyIdx: -1,
+                    historyBytes: 0,
+                    historyWarned: false,
+                });
+            };
+            img.onerror = () => resolve(null);
+            img.src = e.target.result;
         };
-        img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+    });
 }
+
+// Copies the live working variables (canvas history, B&W flag, etc.) for
+// the currently active image back into its slot in `images`, so nothing
+// is lost when switching to a different image.
+function captureCurrentImageState() {
+    const state = images[currentImageIndex];
+    if (!state) return;
+    state.sourceImage   = sourceImage;
+    state.bwMode        = bwMode;
+    state.colorSnapshot = colorSnapshot;
+    state.currentAngle  = currentAngle;
+    state.markerCount   = markerCount;
+    state.history       = history;
+    state.historyIdx    = historyIdx;
+    state.historyBytes  = historyBytes;
+    state.historyWarned = historyWarned;
+}
+
+// Loads a list of File objects, appending each as its own independent
+// image, then switches the canvas to show the first newly-added one.
+async function loadImages(fileList) {
+    const files = Array.from(fileList || []).filter(f => f && f.type && f.type.startsWith('image/'));
+    if (!files.length) return;
+
+    const loaded = await Promise.all(files.map(readImageFile));
+    const firstNewIdx = images.length;
+    loaded.forEach(state => { if (state) images.push(state); });
+    if (!images.length) return;
+
+    await switchToImage(firstNewIdx < images.length ? firstNewIdx : images.length - 1);
+}
+
+// Activates the image at `idx`: saves the outgoing image's working state
+// and restores the incoming one (canvas pixels, undo history, B&W/rotate
+// flags, marker count, ...) so each file's edits persist independently.
+async function switchToImage(idx) {
+    if (idx < 0 || idx >= images.length || idx === currentImageIndex) { updateImageNavUI(); return; }
+
+    // Bail out of any in-progress interaction before swapping images
+    if (activeTool === 'crop') exitCropMode();
+    isDrawing = false; drawStart = null; lastPoint = null;
+    if (overlay.width && overlay.height) octx.clearRect(0, 0, overlay.width, overlay.height);
+
+    captureCurrentImageState();
+
+    currentImageIndex = idx;
+    const state = images[idx];
+
+    sourceImage   = state.sourceImage;
+    bwMode        = state.bwMode;
+    colorSnapshot = state.colorSnapshot;
+    currentAngle  = state.currentAngle;
+    markerCount   = state.markerCount;
+    history       = state.history;
+    historyIdx    = state.historyIdx;
+    historyBytes  = state.historyBytes;
+    historyWarned = state.historyWarned;
+    historyToken++;
+    historySaveQueue = Promise.resolve();
+
+    document.getElementById('tool-bw').classList.toggle('active', bwMode);
+    markerNextVal.textContent = markerCount;
+
+    if (history.length && historyIdx >= 0) {
+        await loadSnapshotIntoCanvas(history[historyIdx]);
+    } else {
+        renderSource();
+    }
+
+    resetZoom();
+    updateUI();
+    updateHistoryUI();
+
+    // Brand-new image: capture its baseline undo state now that it's rendered
+    if (!history.length) {
+        await saveHistory();
+        updateHistoryUI();
+    }
+
+    updateImageNavUI();
+}
+
+function truncateImageName(name, max = 24) {
+    if (!name) return '';
+    return name.length > max ? name.slice(0, max - 1) + '…' : name;
+}
+
+function updateImageNavUI() {
+    const multi = images.length > 1;
+    imageNavGroup.classList.toggle('d-none', !multi);
+    prevImageBtn.disabled = !multi;
+    nextImageBtn.disabled = !multi;
+    updateInfoBar();
+}
+
+// Combines image counter, filename, and pixel dimensions into the single
+// info line shown in the canvas header, e.g. "7/11 - armageddon.webp - 1000 × 1500px (0.67)"
+function updateInfoBar() {
+    if (!sourceImage) { infoBar.textContent = '— open an image to begin'; return; }
+    const parts = [];
+    if (images.length > 1) parts.push(`${currentImageIndex + 1}/${images.length}`);
+    const name = (images[currentImageIndex] || {}).name;
+    if (name) parts.push(truncateImageName(name, 40));
+    parts.push(formatDims(canvas.width, canvas.height));
+    infoBar.textContent = parts.join(' - ');
+}
+
+prevImageBtn.addEventListener('click', () => {
+    if (images.length < 2) return;
+    switchToImage((currentImageIndex - 1 + images.length) % images.length);
+});
+nextImageBtn.addEventListener('click', () => {
+    if (images.length < 2) return;
+    switchToImage((currentImageIndex + 1) % images.length);
+});
 
 function renderSource() {
     if (!sourceImage) return;
@@ -1108,7 +1271,7 @@ function updateUI() {
     copyBtn.classList.toggle('d-none', !hasImg);
     clearDrawingsBtn.classList.toggle('d-none', !hasImg);
     document.getElementById('navExportWrap').classList.toggle('visible', hasImg);
-    if (hasImg) infoBar.textContent = formatDims(canvas.width, canvas.height);
+    if (hasImg) updateInfoBar();
     syncOverlaySize();
 }
 
@@ -1534,7 +1697,7 @@ function applyRotate(deg) {
     overlay.height = newH;
     ctx.drawImage(tmp, 0, 0);
     syncOverlaySize();
-    infoBar.textContent = formatDims(canvas.width, canvas.height);
+    updateInfoBar();
     saveHistory();
 }
 
@@ -1668,7 +1831,7 @@ function applyResize() {
     ctx.clearRect(0, 0, targetW, targetH);
     ctx.drawImage(tmp, 0, 0);
     syncOverlaySize();
-    infoBar.textContent = formatDims(canvas.width, canvas.height);
+    updateInfoBar();
     saveHistory();
 }
 
@@ -1723,7 +1886,7 @@ applyCropBtn.addEventListener('click', () => {
     overlay.height = h;
     ctx.putImageData(imgData, 0, 0);
     syncOverlaySize();
-    infoBar.textContent = formatDims(w, h);
+    updateInfoBar();
     saveHistory();
     exitCropMode();
     setTool('select');
@@ -1937,8 +2100,8 @@ copyBtn.addEventListener('click', async () => {
 // FILE LOADING
 // ═══════════════════════════════════════════════════════════════
 imageLoader.addEventListener('change', e => {
-    const f = e.target.files[0];
-    if (f) loadImage(f);
+    loadImages(e.target.files);
+    imageLoader.value = ''; // allow re-selecting the same file(s) later
 });
 
 // Paste an image from the clipboard (Ctrl+V / Cmd+V)
@@ -1952,7 +2115,7 @@ document.addEventListener('paste', e => {
         if (item.type && item.type.startsWith('image/')) {
             e.preventDefault();
             const file = item.getAsFile();
-            if (file) loadImage(file);
+            if (file) loadImages([file]);
             return;
         }
     }
@@ -1971,7 +2134,7 @@ dropZone.addEventListener('click', e => {
 }));
 dropZone.addEventListener('drop', e => {
     const files = Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/'));
-    if (files[0]) loadImage(files[0]);
+    if (files.length) loadImages(files);
 });
 
 // Canvas area drop
@@ -1981,7 +2144,7 @@ canvasWrap.addEventListener('dragleave', e => { if (!canvasWrap.contains(e.relat
 canvasWrap.addEventListener('drop', e => {
     e.preventDefault(); canvasWrap.classList.remove('drag-over-canvas');
     const files = Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/'));
-    if (files[0]) loadImage(files[0]);
+    if (files.length) loadImages(files);
 });
 
 document.addEventListener('dragover', e => e.preventDefault());
